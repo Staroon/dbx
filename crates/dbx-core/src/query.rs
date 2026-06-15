@@ -968,6 +968,15 @@ pub async fn execute_sql_statement_with_options(
         return Err("Use MongoDB-specific commands".to_string());
     }
 
+    let db_type = connection_database_type(state, connection_id).await;
+    let has_executable_sql = db_type.map_or_else(
+        || crate::sql::has_executable_sql(sql),
+        |db_type| crate::sql::has_executable_sql_for_database(sql, db_type),
+    );
+    if !has_executable_sql {
+        return Ok(empty_query_result(0));
+    }
+
     // When a query tab has a client session, keep even database-less execution
     // on that tab-scoped pool so connection-level state (for example MySQL @vars)
     // survives across runs.
@@ -1094,6 +1103,9 @@ pub async fn execute_multi_core_with_options(
         || split_sql_statements(sql),
         |db_type| crate::sql::split_sql_statements_for_database(sql, db_type),
     );
+    if statements.is_empty() {
+        return Ok(vec![empty_query_result(0)]);
+    }
 
     let mysql_pool = {
         let connections = state.connections.read().await;
@@ -1198,6 +1210,20 @@ fn error_query_result(message: String) -> db::QueryResult {
         rows: vec![vec![serde_json::Value::String(message)]],
         affected_rows: 0,
         execution_time_ms: 0,
+        truncated: false,
+        session_id: None,
+        has_more: false,
+    }
+}
+
+fn empty_query_result(execution_time_ms: u128) -> db::QueryResult {
+    db::QueryResult {
+        columns: vec![],
+        column_types: Vec::new(),
+        column_sortables: vec![],
+        rows: vec![],
+        affected_rows: 0,
+        execution_time_ms,
         truncated: false,
         session_id: None,
         has_more: false,
