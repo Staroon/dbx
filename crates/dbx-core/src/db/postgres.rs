@@ -9,13 +9,15 @@ use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, CryptoProvi
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::server::ParsedCertificate;
 use std::fs::File;
+use std::future::Future;
 use std::io::BufReader;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_postgres::config::SslMode;
 use tokio_postgres::types::{FromSql, Type};
-use tokio_postgres::{Row, SimpleQueryMessage};
+use tokio_postgres::{NoTls, Row, SimpleQueryMessage};
+use tokio_util::sync::CancellationToken;
 
 use super::file_validator::validate_file_path;
 use crate::sql::starts_with_executable_sql_keyword;
@@ -1330,6 +1332,24 @@ pub async fn execute_query_with_max_rows(
     }
 }
 
+pub async fn execute_query_with_max_rows_and_cancel(
+    pool: &Pool,
+    sql: &str,
+    max_rows: Option<usize>,
+    cancel_token: Option<CancellationToken>,
+    timeout_duration: Option<Duration>,
+) -> Result<QueryResult, String> {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let pg_cancel_token = client.cancel_token();
+    wait_postgres_query(
+        pg_cancel_token,
+        cancel_token,
+        timeout_duration,
+        execute_query_with_max_rows_inner(&client, sql, max_rows),
+    )
+    .await
+}
+
 pub async fn execute_query_with_schema(pool: &Pool, schema: &str, sql: &str) -> Result<QueryResult, String> {
     execute_query_with_schema_and_max_rows(pool, schema, sql, None).await
 }
@@ -1387,6 +1407,131 @@ pub async fn execute_query_with_schema_and_max_rows(
     );
 
     result
+}
+
+pub async fn execute_query_with_schema_and_max_rows_and_cancel(
+    pool: &Pool,
+    schema: &str,
+    sql: &str,
+    max_rows: Option<usize>,
+    cancel_token: Option<CancellationToken>,
+    timeout_duration: Option<Duration>,
+) -> Result<QueryResult, String> {
+    let start = Instant::now();
+    let checkout_start = Instant::now();
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    log::info!(
+        "[postgres][execute_with_schema:pool:done] elapsed_ms={} total_ms={} schema={}",
+        checkout_start.elapsed().as_millis(),
+        start.elapsed().as_millis(),
+        schema
+    );
+    if is_transaction_recovery_statement(sql) {
+        log::info!(
+            "[postgres][execute_with_schema:skip-search-path] total_ms={} reason=transaction-recovery",
+            start.elapsed().as_millis()
+        );
+        let pg_cancel_token = client.cancel_token();
+        return wait_postgres_query(
+            pg_cancel_token,
+            cancel_token,
+            timeout_duration,
+            execute_query_with_max_rows_inner(&client, sql, max_rows),
+        )
+        .await;
+    }
+
+    let set_schema_start = Instant::now();
+    client.execute(&format!("SET search_path TO {}", pg_quote_ident(schema)), &[]).await.map_err(pg_error_to_string)?;
+    log::info!(
+        "[postgres][execute_with_schema:set-search-path:done] elapsed_ms={} total_ms={}",
+        set_schema_start.elapsed().as_millis(),
+        start.elapsed().as_millis()
+    );
+
+    let query_start = Instant::now();
+    let pg_cancel_token = client.cancel_token();
+    let result = wait_postgres_query(
+        pg_cancel_token,
+        cancel_token,
+        timeout_duration,
+        execute_query_with_max_rows_inner(&client, sql, max_rows),
+    )
+    .await;
+    if result.is_ok() {
+        clear_postgres_caches_after_ddl(pool, Some(&client), sql);
+    }
+    log::info!(
+        "[postgres][execute_with_schema:query:done] elapsed_ms={} total_ms={} ok={}",
+        query_start.elapsed().as_millis(),
+        start.elapsed().as_millis(),
+        result.is_ok()
+    );
+
+    let reset_start = Instant::now();
+    let _ = client.execute("RESET search_path", &[]).await;
+    log::info!(
+        "[postgres][execute_with_schema:reset-search-path:done] elapsed_ms={} total_ms={}",
+        reset_start.elapsed().as_millis(),
+        start.elapsed().as_millis()
+    );
+
+    result
+}
+
+async fn wait_postgres_query<T, F>(
+    pg_cancel_token: tokio_postgres::CancelToken,
+    cancel_token: Option<CancellationToken>,
+    timeout_duration: Option<Duration>,
+    future: F,
+) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    match (cancel_token, timeout_duration) {
+        (Some(token), Some(duration)) => {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    cancel_postgres_query(pg_cancel_token).await;
+                    Err(crate::query::canceled_error())
+                }
+                result = tokio::time::timeout(duration, future) => match result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        cancel_postgres_query(pg_cancel_token).await;
+                        Err(format!("Query timed out after {} seconds", duration.as_secs()))
+                    }
+                },
+            }
+        }
+        (None, Some(duration)) => match tokio::time::timeout(duration, future).await {
+            Ok(result) => result,
+            Err(_) => {
+                cancel_postgres_query(pg_cancel_token).await;
+                Err(format!("Query timed out after {} seconds", duration.as_secs()))
+            }
+        },
+        (Some(token), None) => {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    cancel_postgres_query(pg_cancel_token).await;
+                    Err(crate::query::canceled_error())
+                }
+                result = future => result,
+            }
+        }
+        (None, None) => future.await,
+    }
+}
+
+async fn cancel_postgres_query(pg_cancel_token: tokio_postgres::CancelToken) {
+    match tokio::time::timeout(Duration::from_secs(2), pg_cancel_token.cancel_query(NoTls)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => log::warn!("Failed to send PostgreSQL cancel request: {err}"),
+        Err(_) => log::warn!("Timed out sending PostgreSQL cancel request"),
+    }
 }
 
 fn is_transaction_recovery_statement(sql: &str) -> bool {

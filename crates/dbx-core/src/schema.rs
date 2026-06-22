@@ -2113,6 +2113,20 @@ pub async fn get_object_source_core(
     name: &str,
     object_type: db::ObjectSourceKind,
 ) -> Result<db::ObjectSource, String> {
+    retry_metadata_connection(state, connection_id, Some(database), || {
+        get_object_source_once(state, connection_id, database, schema, name, object_type.clone())
+    })
+    .await
+}
+
+async fn get_object_source_once(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema: &str,
+    name: &str,
+    object_type: db::ObjectSourceKind,
+) -> Result<db::ObjectSource, String> {
     let pool_key = state.get_or_create_pool(connection_id, Some(database)).await?;
     let db_config = connection_config(state, connection_id).await;
     let source = {

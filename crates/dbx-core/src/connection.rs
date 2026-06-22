@@ -82,8 +82,8 @@ pub enum PoolKind {
 }
 
 pub struct AppState {
-    pub connections: RwLock<HashMap<String, PoolKind>>,
-    keepalive_tasks: RwLock<HashMap<String, JoinHandle<()>>>,
+    pub connections: Arc<RwLock<HashMap<String, PoolKind>>>,
+    keepalive_tasks: Arc<RwLock<HashMap<String, JoinHandle<()>>>>,
     pub configs: RwLock<HashMap<String, ConnectionConfig>>,
     pub running_queries: RunningQueries,
     pub tunnels: TunnelManager,
@@ -261,8 +261,8 @@ impl AppState {
         app_version: impl Into<String>,
     ) -> Self {
         Self {
-            connections: RwLock::new(HashMap::new()),
-            keepalive_tasks: RwLock::new(HashMap::new()),
+            connections: Arc::new(RwLock::new(HashMap::new())),
+            keepalive_tasks: Arc::new(RwLock::new(HashMap::new())),
             configs: RwLock::new(HashMap::new()),
             running_queries: RunningQueries::default(),
             tunnels: TunnelManager::new(),
@@ -348,13 +348,23 @@ impl AppState {
         let key = pool_key.to_string();
         let interval = Duration::from_secs(interval_secs.max(1));
         let timeout = Duration::from_secs(config.effective_connect_timeout_secs().max(1));
+        let connections = self.connections.clone();
+        let keepalive_tasks = self.keepalive_tasks.clone();
         let handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
                 let result = tokio::time::timeout(timeout, ping_keepalive_target(&mut target, timeout)).await;
                 match result {
                     Ok(Ok(())) => {}
-                    Ok(Err(err)) => log::warn!("Connection keepalive failed for '{key}': {err}"),
+                    Ok(Err(err)) => {
+                        log::warn!("Connection keepalive failed for '{key}': {err}; invalidating pool");
+                        keepalive_tasks.write().await.remove(&key);
+                        let removed = connections.write().await.remove(&key);
+                        if let Some(pool) = removed {
+                            close_pool_kind_with_timeout(key, pool).await;
+                        }
+                        break;
+                    }
                     Err(_) => log::warn!("Connection keepalive timed out for '{key}' after {}s", timeout.as_secs()),
                 }
             }
@@ -1053,7 +1063,8 @@ impl AppState {
                     let client = client.clone();
                     drop(connections);
                     let mut agent = client.lock().await;
-                    match agent.test_connection(serde_json::json!({})).await {
+                    let timeout = crate::db::connection_timeout();
+                    match agent.validate_connection(Some(timeout)).await {
                         Ok(_) => false,
                         Err(err) => {
                             log::warn!("Agent connection pool '{pool_key}' is stale: {err}");
@@ -1535,6 +1546,7 @@ enum KeepaliveTarget {
     Elasticsearch(db::elasticsearch_driver::EsClient),
     VectorDb(db::vector_driver::VectorClient),
     InfluxDb(db::influxdb_driver::InfluxdbClient),
+    Agent(Arc<tokio::sync::Mutex<db::agent_driver::AgentDriverClient>>),
 }
 
 fn keepalive_target_from_pool(pool: &PoolKind, config: &ConnectionConfig) -> Option<KeepaliveTarget> {
@@ -1552,6 +1564,7 @@ fn keepalive_target_from_pool(pool: &PoolKind, config: &ConnectionConfig) -> Opt
         PoolKind::Elasticsearch(client) => Some(KeepaliveTarget::Elasticsearch(client.clone())),
         PoolKind::VectorDb(client) => Some(KeepaliveTarget::VectorDb(client.clone())),
         PoolKind::InfluxDb(client) => Some(KeepaliveTarget::InfluxDb(client.clone())),
+        PoolKind::Agent(client) => Some(KeepaliveTarget::Agent(client.clone())),
         _ => None,
     }
 }
@@ -1573,12 +1586,26 @@ async fn ping_keepalive_target(target: &mut KeepaliveTarget, timeout: Duration) 
         }
         KeepaliveTarget::ClickHouse(client) => db::clickhouse_driver::test_connection(client, timeout).await,
         KeepaliveTarget::SqlServer(client) => {
-            let mut client = client.lock().await;
+            let Ok(mut client) = client.try_lock() else {
+                return Ok(());
+            };
             db::sqlserver::test_connection(&mut client).await
         }
         KeepaliveTarget::Elasticsearch(client) => db::elasticsearch_driver::test_connection(client, timeout).await,
         KeepaliveTarget::VectorDb(client) => db::vector_driver::test_connection(client, timeout).await,
         KeepaliveTarget::InfluxDb(client) => db::influxdb_driver::test_connection(client, timeout).await,
+        KeepaliveTarget::Agent(client) => {
+            let Ok(mut client) = client.try_lock() else {
+                return Ok(());
+            };
+            match client.validate_connection(Some(timeout)).await {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    client.kill();
+                    Err(err)
+                }
+            }
+        }
     }
 }
 
