@@ -38,6 +38,7 @@ const EtcdKeyBrowser = defineAsyncComponent(() => import("@/components/etcd/Etcd
 const DocumentBrowser = defineAsyncComponent(() => import("@/components/document/DocumentBrowser.vue"));
 const VectorBrowser = defineAsyncComponent(() => import("@/components/vector/VectorBrowser.vue"));
 const MqAdminConsole = defineAsyncComponent(() => import("@/components/mq/MqAdminConsole.vue"));
+const NacosAdminConsole = defineAsyncComponent(() => import("@/components/nacos/NacosAdminConsole.vue"));
 const ObjectBrowser = defineAsyncComponent(() => import("@/components/objects/ObjectBrowser.vue"));
 const TableStructureEditor = defineAsyncComponent(() => import("@/components/structure/TableStructureEditor.vue"));
 const DatabaseUserAdmin = defineAsyncComponent(() => import("@/components/admin/DatabaseUserAdmin.vue"));
@@ -1026,6 +1027,12 @@ defineExpose({ focusSearch, refreshData, handleModRTarget, requestQueryEditorExe
     <template v-else-if="activeTab.mode === 'mq'">
       <div class="flex-1 min-h-0">
         <MqAdminConsole :key="activeTab.id" :connection-id="activeTab.connectionId" :initial-tenant="activeTab.mqTenant" :read-only="activeConnection?.read_only ?? false" />
+      </div>
+    </template>
+
+    <template v-else-if="activeTab.mode === 'nacos'">
+      <div class="flex-1 min-h-0">
+        <NacosAdminConsole :key="activeTab.id" :connection-id="activeTab.connectionId" :namespace="activeTab.nacosNamespace" :namespace-name="activeTab.nacosNamespaceName" :read-only="activeConnection?.read_only ?? false" />
       </div>
     </template>
 

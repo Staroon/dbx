@@ -228,6 +228,23 @@ export const pendingOpenDbFiles = forward("pendingOpenDbFiles");
 export const pendingOpenConnectionLinks = forward("pendingOpenConnectionLinks");
 export const readExternalSqlFile = forward("readExternalSqlFile");
 
+// Nacos
+export const nacosTestConnection = forward("nacosTestConnection");
+export const nacosListNamespaces = forward("nacosListNamespaces");
+export const nacosCreateNamespace = forward("nacosCreateNamespace");
+export const nacosUpdateNamespace = forward("nacosUpdateNamespace");
+export const nacosListConfigs = forward("nacosListConfigs");
+export const nacosGetConfig = forward("nacosGetConfig");
+export const nacosPublishConfig = forward("nacosPublishConfig");
+export const nacosDeleteConfig = forward("nacosDeleteConfig");
+export const nacosListConfigHistory = forward("nacosListConfigHistory");
+export const nacosGetConfigHistory = forward("nacosGetConfigHistory");
+export const nacosRollbackConfig = forward("nacosRollbackConfig");
+export const nacosListServices = forward("nacosListServices");
+export const nacosListInstances = forward("nacosListInstances");
+export const nacosUpdateInstance = forward("nacosUpdateInstance");
+export const nacosRawRequest = forward("nacosRawRequest");
+
 // Data Transfer
 export const startTransfer = forward("startTransfer");
 export const cancelTransfer = forward("cancelTransfer");

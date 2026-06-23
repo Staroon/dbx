@@ -879,6 +879,8 @@ export const useConnectionStore = defineStore("connection", () => {
       await loadVectorCollections(connectionId);
     } else if (config.db_type === "mq") {
       await loadMqTenants(connectionId, { force: true });
+    } else if (config.db_type === "nacos") {
+      await loadNacosNamespaces(connectionId, { force: true });
     } else {
       await loadDatabases(connectionId, { force: true });
     }
@@ -1218,6 +1220,47 @@ export const useConnectionStore = defineStore("connection", () => {
           connectionId,
           mqTenant: tenant,
         })),
+      );
+      node.isExpanded = true;
+    } catch (e) {
+      recordMetadataLoadError(connectionId, e);
+      throw e;
+    } finally {
+      node.isLoading = false;
+    }
+  }
+
+  async function loadNacosNamespaces(connectionId: string, options?: LoadTreeOptions) {
+    const node = findNode(treeNodes.value, connectionId);
+    if (!node) return;
+
+    node.isLoading = true;
+    try {
+      await ensureConnected(connectionId);
+      if (useCachedChildren(node, options)) return;
+
+      const namespaces = await api.nacosListNamespaces(connectionId);
+      const sorted = [...namespaces].sort((left, right) => {
+        const leftLabel = left.namespaceShowName || left.namespace || "public";
+        const rightLabel = right.namespaceShowName || right.namespace || "public";
+        return leftLabel.localeCompare(rightLabel);
+      });
+      setChildren(
+        node,
+        sorted.map((namespace) => {
+          const value = namespace.namespace || "";
+          const label = namespace.namespaceShowName || value || "public";
+          return {
+            id: schemaCacheKey(connectionId, "nacos-namespace", value || "public"),
+            label,
+            type: "nacos-namespace" as const,
+            connectionId,
+            nacosNamespace: value,
+            nacosNamespaceName: label,
+            comment: namespace.namespaceDesc || null,
+            objectCount: namespace.configCount,
+          };
+        }),
       );
       node.isExpanded = true;
     } catch (e) {
@@ -1996,6 +2039,8 @@ export const useConnectionStore = defineStore("connection", () => {
         await loadVectorCollections(node.connectionId);
       } else if (config?.db_type === "mq") {
         await loadMqTenants(node.connectionId, options);
+      } else if (config?.db_type === "nacos") {
+        await loadNacosNamespaces(node.connectionId, options);
       } else {
         await loadDatabases(node.connectionId, options);
       }
@@ -3266,6 +3311,7 @@ export const useConnectionStore = defineStore("connection", () => {
     refreshRedisDbKeyCounts,
     loadEtcdRoot,
     loadMqTenants,
+    loadNacosNamespaces,
     updateRedisDbKeyStats,
     loadMongoDatabases,
     loadElasticsearchIndices,
