@@ -499,6 +499,7 @@ export const useQueryStore = defineStore("query", () => {
       schema: t.schema,
       sql: t.sql,
       savedSqlId: t.savedSqlId,
+      externalSqlPath: t.externalSqlPath,
       lastExecutedSql: t.lastExecutedSql,
       resultBaseSql: t.resultBaseSql,
       resultSortedSql: t.resultSortedSql,
@@ -713,7 +714,7 @@ export const useQueryStore = defineStore("query", () => {
 
   function isTabDirty(tab: QueryTab): boolean {
     if (tab.mode !== "query") return false;
-    if (!tab.sql.trim()) return false;
+    if (!tab.externalSqlPath && !tab.sql.trim()) return false;
     const original = tab.originalSql;
     if (original === undefined) return !!tab.savedSqlId;
     return tab.sql !== original;
@@ -951,10 +952,23 @@ export const useQueryStore = defineStore("query", () => {
     const tab = tabs.value.find((t) => t.id === id);
     if (!tab) return;
     tab.savedSqlId = savedSqlId;
+    tab.externalSqlPath = undefined;
     if (title) {
       tab.title = title;
       tab.customTitle = true;
     }
+  }
+
+  function linkExternalSqlPath(id: string, path: string, title?: string) {
+    const tab = tabs.value.find((t) => t.id === id);
+    if (!tab) return;
+    tab.externalSqlPath = path;
+    tab.savedSqlId = undefined;
+    if (title) {
+      tab.title = title;
+      tab.customTitle = true;
+    }
+    markTabClean(tab);
   }
 
   function openSavedSql(file: SavedSqlFile) {
@@ -2325,6 +2339,7 @@ export const useQueryStore = defineStore("query", () => {
     openNacosAdmin,
     openTableStructure,
     linkSavedSql,
+    linkExternalSqlPath,
     openSavedSql,
     togglePinnedTab,
     reorderTab,

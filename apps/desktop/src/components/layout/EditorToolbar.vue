@@ -67,6 +67,7 @@ const isSingleDb = computed(() => isSingleDatabase(props.activeConnection?.db_ty
 const hasDefaultDatabaseOption = computed(() => activeDatabaseOptions.value.includes(""));
 const schemaDatabaseKey = computed(() => props.activeTab.database || (isSingleDb.value ? "_" : ""));
 const saveTooltip = computed(() => (props.activeTab.objectSource ? t("objects.saveSource") : t("toolbar.saveSql")));
+const canSaveSql = computed(() => !!props.activeTab.externalSqlPath || !!props.activeTab.sql.trim());
 const keywordCaseIsLower = computed(() => props.sqlKeywordCase === "lower");
 const keywordCaseToggleTooltip = computed(() => (keywordCaseIsLower.value ? t("toolbar.keywordCaseUpper") : t("toolbar.keywordCaseLower")));
 
@@ -197,7 +198,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
       </Tooltip>
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button variant="ghost" size="icon" class="h-6 w-6 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200" :disabled="!activeTab.sql.trim()" @click="emit('saveSql')">
+          <Button variant="ghost" size="icon" class="h-6 w-6 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200" :disabled="!canSaveSql" @click="emit('saveSql')">
             <Save class="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>

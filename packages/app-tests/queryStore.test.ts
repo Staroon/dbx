@@ -92,6 +92,52 @@ test("renames query tab titles", () => {
   assert.equal(tab?.customTitle, true);
 });
 
+test("linkExternalSqlPath records the local path and detaches saved SQL", () => {
+  setActivePinia(createPinia());
+  const store = useQueryStore();
+  const tabId = store.createTab("conn-1", "db", "draft.sql");
+
+  store.updateSql(tabId, "select 1;");
+  store.linkSavedSql(tabId, "saved-1", "library.sql");
+  store.linkExternalSqlPath(tabId, "/tmp/draft.sql", "draft.sql");
+  const tab = store.tabs.find((item) => item.id === tabId);
+
+  assert.equal(tab?.externalSqlPath, "/tmp/draft.sql");
+  assert.equal(tab?.savedSqlId, undefined);
+  assert.equal(tab?.title, "draft.sql");
+  assert.equal(store.isTabDirty(tab!), false);
+
+  store.updateSql(tabId, "");
+  assert.equal(store.isTabDirty(tab!), true);
+});
+
+test("external SQL file paths persist with open query tabs", async () => {
+  const restoreStorage = installMemoryStorage();
+  try {
+    setActivePinia(createPinia());
+    let store = useQueryStore();
+    const tabId = store.createTab("conn-1", "db", "draft.sql");
+    store.updateSql(tabId, "select 1;");
+    store.linkExternalSqlPath(tabId, "/tmp/draft.sql", "draft.sql");
+
+    await waitFor(() => !!globalThis.localStorage.getItem("dbx-open-tabs"), 1000);
+
+    setActivePinia(createPinia());
+    store = useQueryStore();
+    const tab = store.tabs.find((item) => item.id === tabId);
+
+    assert.equal(tab?.externalSqlPath, "/tmp/draft.sql");
+    assert.equal(tab?.savedSqlId, undefined);
+    assert.equal(tab?.sql, "select 1;");
+    assert.equal(store.isTabDirty(tab!), false);
+
+    store.updateSql(tabId, "select 2;");
+    assert.equal(store.isTabDirty(tab!), true);
+  } finally {
+    restoreStorage();
+  }
+});
+
 test("marked-clean object source tabs close without unsaved confirmation", () => {
   setActivePinia(createPinia());
   const store = useQueryStore();
