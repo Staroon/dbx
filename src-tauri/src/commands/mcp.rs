@@ -145,12 +145,34 @@ fn installed_mcp_bin_script() -> Option<String> {
 fn locate_windows_command(command: &str) -> Option<String> {
     command_stdout("where", &[command])
         .ok()
-        .and_then(first_non_empty_line)
+        .and_then(first_windows_command_path)
         .or_else(|| {
-            let script = format!("(Get-Command {} -ErrorAction SilentlyContinue).Source", windows_shell_quote(command));
-            command_stdout("powershell.exe", &["-NoProfile", "-Command", &script]).ok().and_then(first_non_empty_line)
+            let script =
+                format!("(Get-Command -All {} -ErrorAction SilentlyContinue).Source", windows_shell_quote(command));
+            command_stdout("powershell.exe", &["-NoProfile", "-Command", &script])
+                .ok()
+                .and_then(first_windows_command_path)
         })
         .or_else(|| windows_command_candidates(command).into_iter().find(|candidate| Path::new(candidate).is_file()))
+}
+
+#[cfg(windows)]
+fn first_windows_command_path(value: String) -> Option<String> {
+    let paths = value.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>();
+    if let Some(path) =
+        paths.iter().copied().find(|path| is_windows_launchable_command(path) && Path::new(path).is_file())
+    {
+        return Some(path.to_string());
+    }
+    paths.into_iter().find(|path| Path::new(path).is_file()).map(ToOwned::to_owned)
+}
+
+#[cfg(windows)]
+fn is_windows_launchable_command(path: &str) -> bool {
+    matches!(
+        Path::new(path).extension().and_then(|extension| extension.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        Some("exe" | "cmd" | "bat" | "com")
+    )
 }
 
 fn command_success(command: &str, args: &[&str]) -> bool {
@@ -225,7 +247,7 @@ fn windows_command_candidates(command: &str) -> Vec<String> {
     if Path::new(command).extension().is_some() {
         return Vec::new();
     }
-    let names = ["cmd", "exe", "ps1"].iter().map(|extension| format!("{command}.{extension}"));
+    let names = ["cmd", "exe", "bat", "com", "ps1"].iter().map(|extension| format!("{command}.{extension}"));
     names
         .clone()
         .chain(
