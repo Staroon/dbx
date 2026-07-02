@@ -113,6 +113,7 @@ import { focusSidebarRenameInput } from "@/lib/sidebarRenameFocus";
 import { hasTreeNodeDatabaseContext } from "@/lib/treeNodeContext";
 import { defaultPasteTableMode, pasteTableModeCopiesData, supportsWholeRowTableDataCopy, tableClipboardMatchesTarget, tableDataCopyColumnOptions, type PasteTableMode, type TableClipboardContext } from "@/lib/tableClipboard";
 import { sidebarDisplayTableName } from "@/lib/sidebarTableNameDisplay";
+import { shouldMeasureSidebarLabelOverflow } from "@/lib/sidebarLabelTooltip";
 import { selectedTreeNodesInVisibleOrder as orderSelectedTreeNodes, treeSelectionRangeIdsByIndex, treeSelectionRangeIds } from "@/lib/sidebarTreeSelection";
 import { selectedConnectionDeleteTargets } from "@/lib/sidebarConnectionSelection";
 import { supportsDatabaseUserAdmin } from "@/lib/databaseUserAdmin";
@@ -144,12 +145,54 @@ import { createDatabaseCollationOptionsForCharset, fallbackCreateDatabaseCharset
 const { t } = useI18n();
 const labelRef = ref<HTMLElement>();
 const rowRef = ref<HTMLElement>();
-function isLabelTruncated(): boolean {
+const labelOverflowing = ref(false);
+let labelResizeObserver: ResizeObserver | null = null;
+let labelMeasureFrame = 0;
+
+function cancelLabelOverflowMeasure() {
+  if (!labelMeasureFrame) return;
+  window.cancelAnimationFrame(labelMeasureFrame);
+  labelMeasureFrame = 0;
+}
+
+function measureLabelOverflow(): boolean {
   const el = labelRef.value;
-  if (!el) return false;
+  if (!el || !shouldMeasureLabelOverflow()) return false;
   const style = window.getComputedStyle(el);
   if (style.overflowX === "visible" || style.textOverflow !== "ellipsis") return false;
   return el.scrollWidth - el.clientWidth > 2;
+}
+
+function updateLabelOverflow() {
+  labelOverflowing.value = measureLabelOverflow();
+}
+
+function scheduleLabelOverflowMeasure() {
+  if (typeof window === "undefined") {
+    updateLabelOverflow();
+    return;
+  }
+  cancelLabelOverflowMeasure();
+  // Keep synchronous layout reads out of the hover path; they are expensive in
+  // large virtualized sidebar trees, especially on Linux WebKitGTK without GPU help.
+  labelMeasureFrame = window.requestAnimationFrame(() => {
+    labelMeasureFrame = 0;
+    updateLabelOverflow();
+  });
+}
+
+function observeLabelOverflow() {
+  labelResizeObserver?.disconnect();
+  labelResizeObserver = null;
+  if (!shouldMeasureLabelOverflow()) {
+    labelOverflowing.value = false;
+    return;
+  }
+  if (typeof ResizeObserver !== "undefined" && labelRef.value) {
+    labelResizeObserver = new ResizeObserver(scheduleLabelOverflowMeasure);
+    labelResizeObserver.observe(labelRef.value);
+  }
+  scheduleLabelOverflowMeasure();
 }
 const connectionStore = useConnectionStore();
 const queryStore = useQueryStore();
@@ -439,7 +482,7 @@ const detailTooltip = computed(() => connectionInfoTooltip.value ?? objectCommen
 
 function isTooltipDisabled(): boolean {
   if (detailTooltip.value?.rows.length) return isRenamingGroup.value;
-  return isRenamingGroup.value || !isLabelTruncated();
+  return isRenamingGroup.value || !labelOverflowing.value;
 }
 
 async function toggle() {
@@ -3478,6 +3521,14 @@ const isRenamingGroup = ref(false);
 const renameInput = ref("");
 const renameInputRef = ref<HTMLInputElement>();
 
+function shouldMeasureLabelOverflow(): boolean {
+  return shouldMeasureSidebarLabelOverflow({
+    hasDetailTooltip: !!detailTooltip.value?.rows.length,
+    isRenaming: isRenamingGroup.value,
+    usesFullWidthLabel: usesFullWidthLabel.value,
+  });
+}
+
 function startRenameGroup() {
   renameInput.value = props.node.label;
   isRenamingGroup.value = true;
@@ -3495,6 +3546,14 @@ watch(
     }
   },
   { immediate: true },
+);
+
+watch(
+  [() => props.node.id, () => visibleLabel(props.node), () => usesFullWidthLabel.value, () => detailTooltip.value?.rows.length ?? 0, isRenamingGroup],
+  () => {
+    nextTick(observeLabelOverflow);
+  },
+  { flush: "post", immediate: true },
 );
 
 function finishRenameGroup() {
@@ -3718,10 +3777,14 @@ function onRowMouseDown(event: MouseEvent) {
 }
 
 onMounted(() => {
+  observeLabelOverflow();
   window.addEventListener("dbx:sidebar-request-paste-table", onSidebarRequestPasteTable);
 });
 
 onBeforeUnmount(() => {
+  labelResizeObserver?.disconnect();
+  labelResizeObserver = null;
+  cancelLabelOverflowMeasure();
   window.removeEventListener("dbx:sidebar-request-paste-table", onSidebarRequestPasteTable);
   finishTableReferenceDrag();
 });
