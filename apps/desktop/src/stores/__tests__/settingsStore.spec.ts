@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeEditorSettings } from "@/stores/settingsStore";
+import { normalizeDesktopSettings, normalizeEditorSettings } from "@/stores/settingsStore";
 
 describe("normalizeEditorSettings", () => {
   it("enables automatic table aliases by default", () => {
@@ -55,5 +55,11 @@ describe("normalizeEditorSettings", () => {
     expect(normalizeEditorSettings({}).dataGridSearchMode).toBe("filter");
     expect(normalizeEditorSettings({ dataGridSearchMode: "highlight" }).dataGridSearchMode).toBe("highlight");
     expect(normalizeEditorSettings({ dataGridSearchMode: "invalid" as any }).dataGridSearchMode).toBe("filter");
+  });
+});
+
+describe("normalizeDesktopSettings", () => {
+  it("defaults DuckDB worker process isolation to disabled for old settings", () => {
+    expect(normalizeDesktopSettings({}).duckdb_worker_process_isolation).toBe(false);
   });
 });
