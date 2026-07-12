@@ -499,15 +499,9 @@ impl SnippetSyncClient {
                 self.request(method, &url)?.json(&payload).send().await
             }
             SnippetProvider::Gitee => {
-                let files = serde_json::json!({ DEFAULT_SNIPPET_FILE_NAME: { "content": content } }).to_string();
-                self.request(method, &url)?
-                    .form(&[
-                        ("files", files),
-                        ("description", "DBX configuration sync".to_string()),
-                        ("public", "false".to_string()),
-                    ])
-                    .send()
-                    .await
+                let payload = gitee_snippet_payload(content);
+                // Gitee validates `files` as a nested object; form encoding turns it into a string and is rejected.
+                self.request(method, &url)?.json(&payload).send().await
             }
         }
         .map_err(|e| e.to_string())?;
@@ -959,6 +953,14 @@ fn snippet_response_id(value: &serde_json::Value) -> Option<String> {
     value.as_array()?.first()?.get("id")?.as_str().map(str::to_string)
 }
 
+fn gitee_snippet_payload(content: String) -> serde_json::Value {
+    serde_json::json!({
+        "description": "DBX configuration sync",
+        "public": false,
+        "files": { DEFAULT_SNIPPET_FILE_NAME: { "content": content } }
+    })
+}
+
 fn snippet_file_content(
     value: &serde_json::Value,
     file_name: &str,
@@ -1020,11 +1022,10 @@ fn parent_collection_paths(remote_path: &str) -> Vec<String> {
 mod tests {
     use super::{
         apply_sync_snapshot, build_sync_snapshot, build_sync_snapshot_with_saved_secrets, decrypt_sensitive_payload,
-        encrypt_sensitive_payload, forget_webdav_sync_secrets_passphrase, normalized_remote_path,
-        parent_collection_paths, resolve_webdav_sync_secrets_passphrase, save_webdav_sync_secrets_preference,
-        scrub_connection_secrets, snippet_file_content, snippet_response_id, webdav_sync_secrets_status,
-        ApplySnapshotOptions, ConnectionSecretSnapshot,
-        SensitiveSyncPayload,
+        encrypt_sensitive_payload, forget_webdav_sync_secrets_passphrase, gitee_snippet_payload,
+        normalized_remote_path, parent_collection_paths, resolve_webdav_sync_secrets_passphrase,
+        save_webdav_sync_secrets_preference, scrub_connection_secrets, snippet_file_content, snippet_response_id,
+        webdav_sync_secrets_status, ApplySnapshotOptions, ConnectionSecretSnapshot, SensitiveSyncPayload,
     };
     use crate::connection_secrets::NACOS_AUTH_PASSWORD_KEY;
     use crate::models::connection::{
@@ -1034,6 +1035,15 @@ mod tests {
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("dbx-cloud-sync-{name}-{}.db", uuid::Uuid::new_v4()))
+    }
+
+    #[test]
+    fn gitee_snippet_payload_keeps_files_as_nested_object() {
+        let payload = gitee_snippet_payload("snapshot".to_string());
+
+        assert_eq!(payload["files"]["dbx-sync.json"]["content"], "snapshot");
+        assert!(payload["files"].is_object());
+        assert_eq!(payload["public"], false);
     }
 
     fn postgres_connection(id: &str, password: &str) -> ConnectionConfig {
