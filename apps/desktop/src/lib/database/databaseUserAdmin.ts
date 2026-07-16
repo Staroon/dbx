@@ -47,7 +47,11 @@ export interface DatabaseUserAdminProvider {
   defaultPrivilegesForScope?(scope: PrivilegeScope): string[];
 }
 
-export const MYSQL_COMMON_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "REFERENCES", "EXECUTE", "SHOW VIEW", "TRIGGER", "EVENT", "CREATE TEMPORARY TABLES"] as const;
+export const MYSQL_USER_ADMIN_TYPES = new Set<DatabaseType>(["mysql", "goldendb"]);
+export const KINGBASE_USER_ADMIN_TYPES = new Set<DatabaseType>(["kingbase"]);
+export const POSTGRES_USER_ADMIN_TYPES = new Set<DatabaseType>(["postgres", "gaussdb", "highgo", "kwdb", "opengauss", "questdb", "vastbase"]);
+
+export const MYSQL_COMMON_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "REFERENCES", "EXECUTE", "SHOW VIEW", "CREATE VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "TRIGGER", "EVENT", "CREATE TEMPORARY TABLES", "LOCK TABLES"] as const;
 export const STARROCKS_TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "ALTER", "DROP", "EXPORT", "ALL"] as const;
 
 export const POSTGRES_DATABASE_PRIVILEGES = ["CONNECT", "CREATE", "TEMPORARY"] as const;
