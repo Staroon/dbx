@@ -1811,7 +1811,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const nextConnections = [...connections.value];
     nextConnections[index] = { ...nextConnections[index], database_info: normalized };
     connections.value = nextConnections;
-    rebuildTreeNodes();
+    // Database info is reactive connection metadata, not tree structure. Keep
+    // navigator node identities stable so an in-flight first expansion can
+    // still apply its loaded children after this background refresh completes.
   }
 
   async function refreshConnectedDatabaseInfo(connectionId: string, config: ConnectionConfig): Promise<void> {
