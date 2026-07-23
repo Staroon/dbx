@@ -44,6 +44,7 @@ import { resolveDefaultDatabase } from "@/lib/database/defaultDatabase";
 import { findTreeNodeById, resolveNewQueryTarget, resolveNewQueryInitialSql } from "@/lib/sql/newQueryContext";
 import { sqlObjectNavigationSourceKind, sqlObjectNavigationTableType, type SqlObjectNavigationTarget } from "@/lib/sql/sqlNavigation";
 import { buildExecutableObjectSourceStatements, executeObjectSourceSave } from "@/lib/table/objectSourceEditor";
+import { schemaAfterConnectionSwitch } from "@/lib/schema/connectionSchemaInitialization";
 import { resolveExecutableSql, resolveExecutableSqlWithBackend, type SqlExecutionSnapshot } from "@/lib/sql/sqlExecutionTarget";
 import { uuid } from "@/lib/common/utils";
 import { isMacOS, isWindows } from "@/lib/backend/platform";
@@ -1482,7 +1483,19 @@ async function changeActiveConnection(connectionId: string) {
   try {
     await connectionStore.ensureConnected(connectionId);
     const options = await getDatabaseOptions(connectionId);
-    queryStore.updateDatabase(tab.id, resolveDefaultDatabase(connection, options));
+    const database = resolveDefaultDatabase(connection, options);
+    queryStore.updateDatabase(tab.id, database);
+    if (connection.db_type === "oracle") {
+      try {
+        // Oracle returns the session's current schema first; preserve that order before toolbar sorting.
+        const schema = schemaAfterConnectionSwitch(connection.db_type, await api.listSchemas(connectionId, database));
+        if (schema && activeTab.value?.id === tab.id && activeTab.value.connectionId === connectionId) {
+          queryStore.updateSchema(tab.id, schema);
+        }
+      } catch {
+        // Schema metadata failure must not turn a successful connection switch into a connection error.
+      }
+    }
   } catch (e: any) {
     toast(
       t("connection.connectFailed", {
