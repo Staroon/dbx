@@ -180,6 +180,7 @@ import { useToast } from "@/composables/useToast";
 import { useDataGridExport, type MongoCopyUpdateTarget } from "@/composables/useDataGridExport";
 import { eventTargetAllowsNativeClipboard, isPlainClipboardShortcut, readTextFromClipboard } from "@/lib/common/clipboard";
 import { claimDataGridPaste, clearDataGridClipboardCopy, parseDataGridClipboard, planDataGridPaste } from "@/lib/dataGrid/dataGridClipboard";
+import { columnNamesForCopy } from "@/lib/dataGrid/dataGridColumnNameCopy";
 import { DATA_GRID_ROW_NUM_WIDTH, useDataGridColumnResize } from "@/composables/useDataGridColumnResize";
 import { createDataGridColumnStructureSignature } from "@/lib/dataGrid/dataGridColumnWidthState";
 import { useDataGridColumnLayout, useDataGridColumnLayoutState } from "@/composables/useDataGridColumnLayout";
@@ -6498,7 +6499,7 @@ function openCopyColumnNamesDialog(names: string[]) {
 }
 
 function openCopyAllColumnNamesDialog() {
-  openCopyColumnNamesDialog(visibleColumns.value);
+  openCopyColumnNamesDialog(columnNamesForCopy(props.result.columns, visibleColumns.value, "all"));
 }
 
 function copyHeaderColumnOrSelected() {

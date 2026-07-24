@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { COLUMN_NAME_COPY_SEPARATOR_OPTIONS, formatColumnNamesForCopy, isColumnNameCopySeparator, loadColumnNameCopySeparator, saveColumnNameCopySeparator, supportsColumnNameQuoting } from "@/lib/dataGrid/dataGridColumnNameCopy";
+import { COLUMN_NAME_COPY_SEPARATOR_OPTIONS, columnNamesForCopy, formatColumnNamesForCopy, isColumnNameCopySeparator, loadColumnNameCopySeparator, saveColumnNameCopySeparator, supportsColumnNameQuoting } from "@/lib/dataGrid/dataGridColumnNameCopy";
 
 describe("dataGridColumnNameCopy", () => {
   afterEach(() => {
@@ -29,6 +29,7 @@ describe("dataGridColumnNameCopy", () => {
 
   it("ignores the quote flag for databases without SQL identifier quoting", () => {
     expect(formatColumnNamesForCopy(["type"], { separator: "tab", quote: true, databaseType: "mongodb" })).toBe("type");
+    expect(formatColumnNamesForCopy(["type"], { separator: "tab", quote: true, databaseType: "qdrant" })).toBe("type");
     expect(formatColumnNamesForCopy(["type"], { separator: "tab", quote: true })).toBe("type");
   });
 
@@ -39,9 +40,17 @@ describe("dataGridColumnNameCopy", () => {
     expect(supportsColumnNameQuoting("mongodb")).toBe(false);
     expect(supportsColumnNameQuoting("redis")).toBe(false);
     expect(supportsColumnNameQuoting("elasticsearch")).toBe(false);
+    expect(supportsColumnNameQuoting("qdrant")).toBe(false);
     expect(supportsColumnNameQuoting("jdbc")).toBe(false);
     expect(supportsColumnNameQuoting("iotdb")).toBe(false);
     expect(supportsColumnNameQuoting(undefined)).toBe(false);
+  });
+
+  it("keeps hidden columns when copying all column names", () => {
+    const allColumns = ["id", "hidden_value", "created_at"];
+    const visibleColumns = ["id", "created_at"];
+    expect(columnNamesForCopy(allColumns, visibleColumns, "all")).toEqual(allColumns);
+    expect(columnNamesForCopy(allColumns, visibleColumns, "visible")).toEqual(visibleColumns);
   });
 
   it("validates separator values", () => {
