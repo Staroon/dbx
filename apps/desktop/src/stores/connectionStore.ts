@@ -187,7 +187,7 @@ function ensureSqlServerLinkedRootNode(connectionId: string, children: TreeNode[
 }
 
 // Temporary storage for DataGrip import payload (used to read Keychain passwords after import)
-let pendingDataGripPayload: { format: "datagrip-import"; dataSources: string; dataSourcesLocal?: string } | null = null;
+let pendingDataGripPayload: { format: "datagrip-import"; dataSources: string; dataSourcesLocal?: string; dbForestConfig?: string } | null = null;
 
 interface TreeClipboardTableEntry {
   connectionId: string;
@@ -5277,6 +5277,7 @@ export const useConnectionStore = defineStore("connection", () => {
   async function readDataGripImportFile(): Promise<{ content: string; encrypted: boolean } | null> {
     let dataSources: string;
     let dataSourcesLocal = "";
+    let dbForestConfig = "";
 
     if (isTauriRuntime()) {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -5293,6 +5294,11 @@ export const useConnectionStore = defineStore("connection", () => {
         dataSourcesLocal = await readTextFile(dir + "dataSources.local.xml");
       } catch {
         dataSourcesLocal = "";
+      }
+      try {
+        dbForestConfig = await readTextFile(dir + "db-forest-config.xml");
+      } catch {
+        dbForestConfig = "";
       }
     } else {
       const files = await new Promise<FileList>((resolve, reject) => {
@@ -5312,15 +5318,19 @@ export const useConnectionStore = defineStore("connection", () => {
       const fileList = Array.from(files);
       const dsFile = fileList.find((f) => /^dataSources\.xml$/i.test(f.name)) || fileList[0];
       const localFile = fileList.find((f) => /^dataSources\.local\.xml$/i.test(f.name));
+      const forestFile = fileList.find((f) => /^db-forest-config\.xml$/i.test(f.name));
       if (!dsFile) throw new Error("Select dataSources.xml");
       dataSources = await dsFile.text();
       if (localFile) {
         dataSourcesLocal = await localFile.text();
       }
+      if (forestFile) {
+        dbForestConfig = await forestFile.text();
+      }
     }
 
     return {
-      content: JSON.stringify({ format: "datagrip-import", dataSources, dataSourcesLocal }),
+      content: JSON.stringify({ format: "datagrip-import", dataSources, dataSourcesLocal, dbForestConfig }),
       encrypted: false,
     };
   }
@@ -5379,15 +5389,18 @@ export const useConnectionStore = defineStore("connection", () => {
       imported = await parseNavicatConnections(content);
     } else if (!passphrase) {
       const { isDbeaverImportPayload, parseDbeaverImport } = await import("@/lib/imports/dbeaverImport");
-      const { isDataGripImportPayload, parseDataGripConnections } = await import("@/lib/imports/datagripImport");
+      const { isDataGripImportPayload, parseDataGripImport } = await import("@/lib/imports/datagripImport");
       if (isDataGripImportPayload(content)) {
         const payload = JSON.parse(content) as {
           format: "datagrip-import";
           dataSources: string;
           dataSourcesLocal?: string;
+          dbForestConfig?: string;
         };
         pendingDataGripPayload = payload;
-        imported = parseDataGripConnections(payload);
+        const result = parseDataGripImport(payload);
+        imported = result.connections;
+        importedLayout = result.layout;
       } else if (isDbeaverImportPayload(content)) {
         const result = await parseDbeaverImport(content);
         imported = result.connections;
